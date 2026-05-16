@@ -1,0 +1,8 @@
+{
+  "name": "人生无限 (Life Unlimited)",
+  "description": "一款基于昨天-今天-明天时间流的人生复盘与任务管理工具，强调低压力成长与持续记录。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
