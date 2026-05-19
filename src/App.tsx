@@ -14,7 +14,7 @@ const MORANDI_PALETTES: Record<string, { yesterday: string, today: string, tomor
     yesterday: '#DAD7CD',
     today: '#A3B18A',
     tomorrow: '#588157',
-    textYesterday: '#588157',
+    textYesterday: '#FFFFFF',
     textToday: '#FFFFFF',
     textTomorrow: '#FFFFFF'
   },
