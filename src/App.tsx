@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Check, Trash2, Edit2, ChevronRight, ChevronLeft, Calendar, Settings as SettingsIcon, MessageSquare, BookOpen, Clock } from 'lucide-react';
 import { format, addDays, subDays, parseISO, startOfDay, isBefore, isSameDay, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, addMonths, subMonths, isSameMonth } from 'date-fns';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx';
+import { saveAs } from 'file-saver';
 import { cn } from './lib/utils.ts';
 import { useAppStore } from './store.ts';
 import { Task } from './types.ts';
@@ -258,6 +260,8 @@ function TimeCard({ title, date, store, onClick, style, footer }: any) {
 
 // DETAIL PAGE
 function DayDetail({ date, store, onBack, isArchiveMode }: { date: string, store: any, onBack: () => void, isArchiveMode?: boolean, key?: string }) {
+  const [activeTab, setActiveTab] = useState<'tasks' | 'diary'>('tasks');
+  const [diaryValue, setDiaryValue] = useState(store.state.diaries.find((d: any) => d.date === date)?.content || '');
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const tasks = store.state.tasks.filter((t: Task) => t.date === date);
   const isPast = isBefore(parseISO(date), startOfDay(new Date()));
@@ -277,13 +281,19 @@ function DayDetail({ date, store, onBack, isArchiveMode }: { date: string, store
   const coreTasks = displayedTasks.filter((t: Task) => t.type === 'CORE');
   const sideTasks = displayedTasks.filter((t: Task) => t.type === 'SIDE');
 
-  const isEmptyDay = displayedTasks.length === 0;
+  const isEmptyDay = displayedTasks.length === 0 && !diaryValue.trim();
 
   const handleAddTask = (type: 'CORE' | 'SIDE') => {
     if (!newTaskTitle.trim() || readOnly) return;
     if (type === 'CORE' && coreTasks.length >= 7) return;
     store.addTask(newTaskTitle, date, type);
     setNewTaskTitle('');
+  };
+
+  const handleDiaryChange = (val: string) => {
+    if (readOnly) return;
+    setDiaryValue(val);
+    store.saveDiary(date, val);
   };
 
   return (
@@ -303,94 +313,165 @@ function DayDetail({ date, store, onBack, isArchiveMode }: { date: string, store
         </div>
       </header>
 
-      {isEmptyDay && readOnly ? (
-        <div className="flex-1 flex flex-col items-center justify-center py-32 opacity-20 select-none">
-          <div className="w-16 h-16 rounded-full border-2 border-current mb-6 flex items-center justify-center">
-            <div className="w-2 h-2 rounded-full bg-current" />
-          </div>
-          <p className="text-xl font-bold tracking-[0.2em]">今天是纯粹的。</p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-8">
-          <section className="flex flex-col gap-4">
-            <div className="flex justify-between items-end">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-primary" />
-                核心任务
-              </h3>
-              <span className="text-xs font-mono text-gray-400">{coreTasks.length}/7</span>
-            </div>
-            <div className="flex flex-col gap-3">
-              {coreTasks.map(t => (
-                <TaskItem 
-                  key={t.id} 
-                  task={t} 
-                  readOnly={readOnly}
-                  onToggle={() => store.toggleTask(t.id)} 
-                  onDelete={() => store.deleteTask(t.id)} 
-                  onUpdate={(title) => store.updateTask(t.id, { title })} 
-                />
-              ))}
-              {!readOnly && coreTasks.length < 7 && (
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    placeholder="添加核心任务..." 
-                    className="flex-1 bg-white border border-gray-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium"
-                    value={newTaskTitle}
-                    onChange={e => setNewTaskTitle(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleAddTask('CORE')}
-                  />
-                  <button onClick={() => handleAddTask('CORE')} className="p-3 bg-primary text-white rounded-2xl hover:brightness-110 transition-all">
-                    <Plus size={20} />
-                  </button>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {(sideTasks.length > 0 || !readOnly) && (
-            <section className="flex flex-col gap-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2 text-gray-500">
-                <div className="w-2 h-2 rounded-full bg-gray-300" />
-                副线任务
-              </h3>
-              <div className="flex flex-col gap-3">
-                {sideTasks.map(t => (
-                  <TaskItem 
-                    key={t.id} 
-                    task={t} 
-                    readOnly={readOnly}
-                    onToggle={() => store.toggleTask(t.id)} 
-                    onDelete={() => store.deleteTask(t.id)} 
-                    onUpdate={(title) => store.updateTask(t.id, { title })} 
-                  />
-                ))}
-                {!readOnly && (
-                  <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      placeholder="添加副线任务..." 
-                      className="flex-1 bg-white border border-gray-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium"
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') {
-                          const val = (e.target as HTMLInputElement).value;
-                          if (val.trim()) {
-                            store.addTask(val, date, 'SIDE');
-                            (e.target as HTMLInputElement).value = '';
-                          }
-                        }
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
+      {/* Tabs */}
+      {!readOnly && !isTomorrow && (
+        <div className="flex bg-gray-100 p-1 rounded-2xl">
+          <button 
+            onClick={() => setActiveTab('tasks')}
+            className={cn(
+              "flex-1 py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2",
+              activeTab === 'tasks' ? "bg-white shadow-sm text-primary" : "text-gray-400"
+            )}
+          >
+            <Check size={14} /> 任务
+          </button>
+          <button 
+            onClick={() => setActiveTab('diary')}
+            className={cn(
+              "flex-1 py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2",
+              activeTab === 'diary' ? "bg-white shadow-sm text-primary" : "text-gray-400"
+            )}
+          >
+            <BookOpen size={14} /> 小记
+          </button>
         </div>
       )}
 
-      {isEmptyDay && !readOnly && (
+      <AnimatePresence mode="wait">
+        {activeTab === 'tasks' || isTomorrow ? (
+          <motion.div 
+            key="tasks"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex flex-col gap-8"
+          >
+            {isEmptyDay && readOnly ? (
+              <div className="flex-1 flex flex-col items-center justify-center py-32 opacity-20 select-none">
+                <div className="w-16 h-16 rounded-full border-2 border-current mb-6 flex items-center justify-center">
+                  <div className="w-2 h-2 rounded-full bg-current" />
+                </div>
+                <p className="text-xl font-bold tracking-[0.2em]">今天是纯粹的。</p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-8">
+                <section className="flex flex-col gap-4">
+                  <div className="flex justify-between items-end">
+                    <h3 className="text-lg font-semibold flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-primary" />
+                      核心任务
+                    </h3>
+                    <span className="text-xs font-mono text-gray-400">{coreTasks.length}/7</span>
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    {coreTasks.map(t => (
+                      <TaskItem 
+                        key={t.id} 
+                        task={t} 
+                        readOnly={readOnly}
+                        onToggle={() => store.toggleTask(t.id)} 
+                        onDelete={() => store.deleteTask(t.id)} 
+                        onUpdate={(title) => store.updateTask(t.id, { title })} 
+                      />
+                    ))}
+                    {!readOnly && coreTasks.length < 7 && (
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          placeholder="添加核心任务..." 
+                          className="flex-1 bg-white border border-gray-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium"
+                          value={newTaskTitle}
+                          onChange={e => setNewTaskTitle(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleAddTask('CORE')}
+                        />
+                        <button onClick={() => handleAddTask('CORE')} className="p-3 bg-primary text-white rounded-2xl hover:brightness-110 transition-all">
+                          <Plus size={20} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                {(sideTasks.length > 0 || !readOnly) && (
+                  <section className="flex flex-col gap-4">
+                    <h3 className="text-lg font-semibold flex items-center gap-2 text-gray-500">
+                      <div className="w-2 h-2 rounded-full bg-gray-300" />
+                      副线任务
+                    </h3>
+                    <div className="flex flex-col gap-3">
+                      {sideTasks.map(t => (
+                        <TaskItem 
+                          key={t.id} 
+                          task={t} 
+                          readOnly={readOnly}
+                          onToggle={() => store.toggleTask(t.id)} 
+                          onDelete={() => store.deleteTask(t.id)} 
+                          onUpdate={(title) => store.updateTask(t.id, { title })} 
+                        />
+                      ))}
+                      {!readOnly && (
+                        <div className="flex gap-2">
+                          <input 
+                            type="text" 
+                            placeholder="添加副线任务..." 
+                            className="flex-1 bg-white border border-gray-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium"
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                const val = (e.target as HTMLInputElement).value;
+                                if (val.trim()) {
+                                  store.addTask(val, date, 'SIDE');
+                                  (e.target as HTMLInputElement).value = '';
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {/* Archive view also shows diary if tasks are visible */}
+                {readOnly && diaryValue && (
+                  <section className="flex flex-col gap-4 mt-4">
+                    <h3 className="text-lg font-semibold flex items-center gap-2 text-primary">
+                      <BookOpen size={20} />
+                      当日小记
+                    </h3>
+                    <div className="p-6 rounded-[32px] bg-white border border-gray-50 shadow-sm text-sm leading-relaxed text-gray-600 font-medium italic whitespace-pre-wrap">
+                      {diaryValue}
+                    </div>
+                  </section>
+                )}
+              </div>
+            )}
+          </motion.div>
+        ) : (
+          <motion.div 
+            key="diary"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex flex-col gap-4"
+          >
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <BookOpen size={20} className="text-primary" />
+                小记 / Diary
+              </h3>
+            </div>
+            <textarea 
+              className="w-full h-80 bg-white border border-gray-100 rounded-[32px] p-8 text-base font-medium leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all resize-none shadow-sm placeholder:text-gray-200"
+              placeholder="写点什么..."
+              value={diaryValue}
+              onChange={e => handleDiaryChange(e.target.value)}
+            />
+            <p className="text-[10px] text-center font-black text-gray-300 uppercase tracking-widest mt-4">Automated Savings Enabled</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {isEmptyDay && !readOnly && activeTab === 'tasks' && (
         <div className="hidden" />
       )}
     </motion.div>
@@ -636,6 +717,104 @@ function Settings({ store }: { store: any, key?: string }) {
     { name: '琥珀棕', color: '#D6CCC2' },
   ];
 
+  const [startDate, setStartDate] = useState(format(subDays(new Date(), 7), 'yyyy-MM-dd'));
+  const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      const dates = eachDayOfInterval({
+        start: parseISO(startDate),
+        end: parseISO(endDate)
+      });
+
+      const children: any[] = [
+        new Paragraph({
+          text: "人生无限 - 任务与小记导出",
+          heading: HeadingLevel.HEADING_1,
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 400 },
+        }),
+        new Paragraph({
+          text: `导出范围: ${startDate} 至 ${endDate}`,
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 800 },
+        }),
+      ];
+
+      dates.forEach(date => {
+        const dateStr = format(date, 'yyyy-MM-dd');
+        const tasks = store.state.tasks.filter((t: Task) => t.date === dateStr);
+        const diary = store.state.diaries.find((d: any) => d.date === dateStr);
+
+        if (tasks.length > 0 || diary) {
+          children.push(
+            new Paragraph({
+              text: format(date, 'yyyy年MM月dd日 (EEEE)'),
+              heading: HeadingLevel.HEADING_2,
+              spacing: { before: 400, after: 200 },
+            })
+          );
+
+          if (tasks.length > 0) {
+            children.push(new Paragraph({ text: "【任务清单】", heading: HeadingLevel.HEADING_3, spacing: { before: 200 } }));
+            tasks.forEach((t: Task) => {
+              children.push(
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: t.completed ? " [已完成] " : " [未完成] ",
+                      bold: true,
+                    }),
+                    new TextRun(t.title),
+                  ],
+                })
+              );
+            });
+          }
+
+          if (diary && diary.content.trim()) {
+            children.push(new Paragraph({ text: "【当日小记】", heading: HeadingLevel.HEADING_3, spacing: { before: 200 } }));
+            children.push(
+              new Paragraph({
+                text: diary.content,
+                spacing: { before: 100 },
+              })
+            );
+          }
+
+          children.push(new Paragraph({ text: "", spacing: { after: 200 } }));
+        }
+      });
+
+      const doc = new Document({
+        sections: [{
+          properties: {},
+          children: children,
+        }],
+      });
+
+      const blob = await Packer.toBlob(doc);
+      saveAs(blob, `人生无限_导出_${startDate}_${endDate}.docx`);
+    } catch (error) {
+      console.error("Export failed", error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const setRangeLastMonth = () => {
+    setStartDate(format(startOfMonth(subMonths(new Date(), 0)), 'yyyy-MM-dd'));
+    setEndDate(format(endOfMonth(subMonths(new Date(), 0)), 'yyyy-MM-dd'));
+  };
+
+  const setRangeToday = () => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    setStartDate(today);
+    setEndDate(today);
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0 }}
@@ -646,6 +825,59 @@ function Settings({ store }: { store: any, key?: string }) {
         <h2 className="text-3xl font-black tracking-tighter uppercase mb-2">设定</h2>
         <p className="text-sm text-gray-400 font-medium tracking-wide">MORANDI THEMES</p>
       </header>
+
+      <section className="flex flex-col gap-6">
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+          <SettingsIcon size={14} /> 数据导出 (WORD)
+        </h3>
+        <div className="p-6 rounded-[32px] bg-white shadow-sm border border-gray-50 flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <label className="text-[10px] font-black text-gray-300 uppercase tracking-widest pl-2">开始日期</label>
+            <input 
+              type="date" 
+              value={startDate}
+              onChange={e => setStartDate(e.target.value)}
+              className="bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium"
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className="text-[10px] font-black text-gray-300 uppercase tracking-widest pl-2">结束日期</label>
+            <input 
+              type="date" 
+              value={endDate}
+              onChange={e => setEndDate(e.target.value)}
+              className="bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium"
+            />
+          </div>
+          
+          <div className="flex gap-2 mt-2">
+            <button 
+              onClick={setRangeToday}
+              className="flex-1 py-3 bg-gray-50 text-gray-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-100 transition-all"
+            >
+              仅今天
+            </button>
+            <button 
+              onClick={setRangeLastMonth}
+              className="flex-1 py-3 bg-gray-50 text-gray-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-100 transition-all"
+            >
+              本月
+            </button>
+          </div>
+
+          <button 
+            onClick={handleExport}
+            disabled={isExporting}
+            className={cn(
+              "mt-4 w-full py-4 bg-primary text-white rounded-[24px] text-sm font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2",
+              isExporting && "opacity-50 cursor-not-allowed"
+            )}
+          >
+            {isExporting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <BookOpen size={18} />}
+            导出已选择范围
+          </button>
+        </div>
+      </section>
 
       <section className="flex flex-col gap-6">
         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">主题色调</h3>
